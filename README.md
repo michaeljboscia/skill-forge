@@ -1,28 +1,64 @@
-# Skill Forge
+# 🔨 Skill Forge
 
-Development workspace for building AI coding skills. Skills under development live here until they're ready to promote to `~/.claude/skills/`.
+**A repeatable system for building AI coding-skill packages that actually change how an agent writes code.**
 
-## Structure
+Not a library of skills. The *factory* that produces them.
 
-```
-skill-forge/
-  rust/              <- Rust skill package (8 skills, in development)
-    research/          <- Gemini quicksearch + deep research findings
-    drafts/            <- SKILL.md drafts before promotion
-    deep-research/     <- Gemini deep research results
-    session-log.md     <- Session notes
-```
+---
 
-## Promotion Path
+## The problem this solves
 
-```
-skill-forge/rust/drafts/mx-rust-core/SKILL.md
-  -> review + pressure-test
-    -> ~/.claude/skills/mx-rust-core/SKILL.md
-```
+You give your AI coding agent a "skill" — a big markdown file full of best practices — and it nods politely, then writes the exact code you told it not to. Sound familiar?
 
-## Active Projects
+That's not the agent being dumb. It's the skill being built wrong. After **months of failed attempts**, one package (Rust, 8 skills, zero-to-deployed in a single session) finally worked. Skill Forge is that process reverse-engineered from success, so it's repeatable instead of accidental.
 
-| Language | Status | Skills | Searches | Deep Research |
-|----------|--------|--------|----------|---------------|
-| Rust | Research complete | 8 planned | 53 done | 2 in-flight, 5 remaining |
+## Why the previous attempts failed (so yours don't have to)
+
+| The mistake | What actually happened |
+|---|---|
+| **One giant SKILL.md** | 2,000+ lines. The model got "lost in the middle" and ignored the rules buried in the center. |
+| **No research phase** | Rules written from general knowledge = generic, uncited, and blind to ecosystem-specific footguns. |
+| **No anti-rationalization rules** | The skill said what *to* do but not what the model would be *tempted* to do wrong. The model found the loopholes. Every time. |
+| **No difficulty layering** | Beginner and expert patterns mixed together. The model couldn't tell "always do this" from "maybe, in advanced cases." |
+| **No provenance** | Rules without citations are just opinions. Cited rules are verifiable. Models trust verifiable. |
+
+## The 7-phase pipeline
+
+The whole framework lives in **[`SKILLS-FACTORY-FRAMEWORK.md`](./SKILLS-FACTORY-FRAMEWORK.md)**. The short version:
+
+| Phase | Time | What happens |
+|---|---|---|
+| **0 · Scope** | 30 min | Break the language/platform into 6–10 *modes of work*, each with a distinct AI failure mode. If two modes fail the same way, merge them. |
+| **1 · Discovery** | 15 min | 3–5 searches for existing rule sets so you're not reinventing wheels (or repeating their mistakes). |
+| **2 · Quicksearch saturation** | 2–3 hrs | 40–100 targeted searches. Yes, that many. This is where ecosystem-specific knowledge comes from. |
+| **3 · Deep research** | 30–60 min | 7–10 deep-research prompts, run in parallel. |
+| **4 · Writing** | 1–2 hrs | Synthesize into layered skills: *Level 1 always-works* → *Level 2 intermediate* → *Level 3 advanced*, plus Performance, Observability, and — the secret sauce — **Enforcement: Anti-Rationalization Rules**. |
+| **5 · Promotion** | 5 min | Copy the finished drafts into `~/.claude/skills/`. |
+| **6 · Pressure test** | next session | A *fresh* agent tries to weasel out of the rules. Whatever loophole it finds becomes a new enforcement rule. |
+| **7 · Reference population** | optional | Backfill citations and reference docs. |
+
+## The one idea to steal even if you read nothing else
+
+**Anti-rationalization rules.** Don't just tell the model the right thing to do. Name the *wrong* thing it's about to rationalize, and forbid that specifically:
+
+> ❌ "Use proper error handling."
+> ✅ "You will be tempted to `.unwrap()` because it compiles and the demo works. Do not. Every `.unwrap()` in non-test code is a panic waiting for production. Use `?` or handle the error."
+
+The model can't argue with a rule that already predicted its excuse.
+
+## What's in this repo
+
+Pure system, no library:
+
+- **[`SKILLS-FACTORY-FRAMEWORK.md`](./SKILLS-FACTORY-FRAMEWORK.md)** — the full 7-phase pipeline, the skill-file template, and the anti-pattern catalog
+- **[`SKILL-FEEDBACK-LOOP.md`](./SKILL-FEEDBACK-LOOP.md)** — how skills keep improving after they ship
+- **[`ROADMAP.md`](./ROADMAP.md)** — which language/platform packages are next
+- **[`STRATEGIC-GAPS.md`](./STRATEGIC-GAPS.md)** — the honest list of what's still missing
+
+## Who this is for
+
+Anyone maintaining a fleet of AI coding agents who's tired of writing skills that get ignored. It's model-agnostic in spirit; the templates lean toward Claude Code and the `mx-{lang}-{mode}` naming convention, but the method ports anywhere skills are markdown.
+
+---
+
+*Built the hard way so you can build it the fast way.*
