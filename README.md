@@ -8,19 +8,21 @@ Not a library of skills. The *factory* that produces them.
 
 ## The problem this solves
 
-You give your AI coding agent a "skill" — a big markdown file full of best practices — and it nods politely, then writes the exact code you told it not to. Sound familiar?
+You give your AI coding agent a "skill" — a big markdown file full of best practices — and it nods politely, then writes the exact code you told it not to.
 
-That's not the agent being dumb. It's the skill being built wrong. After **months of failed attempts**, one package (Rust, 8 skills, zero-to-deployed in a single session) finally worked. Skill Forge is that process reverse-engineered from success, so it's repeatable instead of accidental.
+That's not the agent being dumb. It's the skill being built wrong. After **months of failed attempts**, one package (Rust, 8 skills, zero-to-deployed in a single session) finally worked. Skill Forge is that process reverse-engineered from the one success, so it's repeatable instead of accidental.
 
 ## Why the previous attempts failed (so yours don't have to)
+
+Each of these is a heresy. Name it, purge it, move on.
 
 | The mistake | What actually happened |
 |---|---|
 | **One giant SKILL.md** | 2,000+ lines. The model got "lost in the middle" and ignored the rules buried in the center. |
-| **No research phase** | Rules written from general knowledge = generic, uncited, and blind to ecosystem-specific footguns. |
+| **No research phase** | Rules written from general knowledge — generic, uncited, blind to ecosystem-specific footguns. |
 | **No anti-rationalization rules** | The skill said what *to* do but not what the model would be *tempted* to do wrong. The model found the loopholes. Every time. |
 | **No difficulty layering** | Beginner and expert patterns mixed together. The model couldn't tell "always do this" from "maybe, in advanced cases." |
-| **No provenance** | Rules without citations are just opinions. Cited rules are verifiable. Models trust verifiable. |
+| **No provenance** | Rules without citations are opinions. Cited rules are verifiable. Models trust verifiable. |
 
 ## The 7-phase pipeline
 
@@ -32,7 +34,7 @@ The whole framework lives in **[`SKILLS-FACTORY-FRAMEWORK.md`](./SKILLS-FACTORY-
 | **1 · Discovery** | 15 min | 3–5 searches for existing rule sets so you're not reinventing wheels (or repeating their mistakes). |
 | **2 · Quicksearch saturation** | 2–3 hrs | 40–100 targeted searches. Yes, that many. This is where ecosystem-specific knowledge comes from. |
 | **3 · Deep research** | 30–60 min | 7–10 deep-research prompts, run in parallel. |
-| **4 · Writing** | 1–2 hrs | Synthesize into layered skills: *Level 1 always-works* → *Level 2 intermediate* → *Level 3 advanced*, plus Performance, Observability, and — the secret sauce — **Enforcement: Anti-Rationalization Rules**. |
+| **4 · Writing** | 1–2 hrs | Synthesize into layered skills: *Level 1 always-works* → *Level 2 intermediate* → *Level 3 advanced*, plus Performance, Observability, and the secret sauce — **Enforcement: Anti-Rationalization Rules**. |
 | **5 · Promotion** | 5 min | Copy the finished drafts into `~/.claude/skills/`. |
 | **6 · Pressure test** | next session | A *fresh* agent tries to weasel out of the rules. Whatever loophole it finds becomes a new enforcement rule. |
 | **7 · Reference population** | optional | Backfill citations and reference docs. |
@@ -44,7 +46,7 @@ The whole framework lives in **[`SKILLS-FACTORY-FRAMEWORK.md`](./SKILLS-FACTORY-
 > ❌ "Use proper error handling."
 > ✅ "You will be tempted to `.unwrap()` because it compiles and the demo works. Do not. Every `.unwrap()` in non-test code is a panic waiting for production. Use `?` or handle the error."
 
-The model can't argue with a rule that already predicted its excuse.
+The model can't argue with a rule that already predicted its excuse. Competence is the only credential — and competence, here, means closing the loopholes before the model finds them.
 
 ## What's in this repo
 
@@ -57,8 +59,8 @@ Pure system, no library:
 
 ## Who this is for
 
-Anyone maintaining a fleet of AI coding agents who's tired of writing skills that get ignored. It's model-agnostic in spirit; the templates lean toward Claude Code and the `mx-{lang}-{mode}` naming convention, but the method ports anywhere skills are markdown.
+Anyone maintaining a fleet of AI coding agents who's tired of writing skills that get ignored. Model-agnostic in spirit; the templates lean toward Claude Code and the `mx-{lang}-{mode}` naming convention, but the method ports anywhere skills are markdown.
 
 ---
 
-*Built the hard way so you can build it the fast way.*
+*A factory that builds the tools that build the code. It's recursion all the way down — and this is the base case.*
