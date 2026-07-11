@@ -14,8 +14,6 @@ That's not the agent being dumb. It's the skill being built wrong. After **month
 
 ## Why the previous attempts failed (so yours don't have to)
 
-Each of these is a heresy. Name it, purge it, move on.
-
 | The mistake | What actually happened |
 |---|---|
 | **One giant SKILL.md** | 2,000+ lines. The model got "lost in the middle" and ignored the rules buried in the center. |
