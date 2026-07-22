@@ -1,7 +1,7 @@
 # Skill-Forge Roadmap
 
-**Last Updated:** 2026-04-08
-**Shipped:** 142 skills across 15 packages
+**Last Updated:** 2026-07-22
+**Shipped:** 150 skills across 16 packages
 **Pipeline:** 20 packages (~107 skills)
 
 ---
@@ -25,6 +25,7 @@
 | 13 | mx-gpu-* | 3 | Shipped |
 | 14 | mx-lottie-* | 4 | Shipped 2026-04-06 |
 | 15 | mx-k3s-* | 8 | Shipped 2026-04-08 |
+| 16 | mx-ghl-* | 8 | Shipped 2026-07-22 |
 
 ---
 
@@ -167,7 +168,7 @@ These are vertical skills — they target *problems*, not languages. They cross 
 
 | Category | Skills |
 |----------|--------|
-| Shipped | 134 |
+| Shipped | 150 |
 | Tier 0 — In progress | 0 (Lottie shipped) |
 | Tier 1 — Language/Runtime | 45 |
 | Tier 2 — Systems Problems | 30 |
