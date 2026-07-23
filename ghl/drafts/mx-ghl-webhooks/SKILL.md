@@ -39,7 +39,7 @@ app.post("/webhooks/ghl", (req, res) => {
 The legacy RSA header `x-wh-signature` is **deprecated 1 July 2026**. New receivers verify `x-ghl-signature` with GHL's Ed25519 public key.
 
 ```ts
-import { verify } from "node:crypto";   // Ed25519 via KeyObject
+import crypto from "node:crypto";   // import the whole module — see below
 
 function verifyGhl(raw: Buffer, sigB64: string | undefined): boolean {
   if (!sigB64) return false;
@@ -47,6 +47,7 @@ function verifyGhl(raw: Buffer, sigB64: string | undefined): boolean {
   return crypto.verify(null, raw, pub, Buffer.from(sigB64, "base64"));      // null algo = Ed25519
 }
 ```
+> Import `crypto` as the default module, not `import { verify }` — the code calls `crypto.verify` and `crypto.createPublicKey`. Named-importing only `verify` leaves `crypto` undefined → `ReferenceError` at first call, every event 401s, and someone "fixes" it by disabling verification (accepting spoofed events).
 
 ### 3. Return 2xx fast; do the work asynchronously
 Acknowledge in milliseconds, then process off the request path.
@@ -56,12 +57,20 @@ res.sendStatus(200);              // ack first
 queue.add(event);                // process later (worker)
 ```
 
-### 4. Make the receiver idempotent
-Deduplicate on the event's unique id (e.g. `webhookId`/`id`) so redelivery doesn't double-process.
+### 4. Make the receiver idempotent — enqueue FIRST, then mark seen, atomically
+Deduplicate on the event's unique id (e.g. `webhookId`/`id`), but order it correctly: persist the event durably *before* marking it seen, and make the dedupe an atomic insert. Marking seen first means a failed enqueue leaves the event seen-but-unprocessed — and GHL won't resend it (see Level 2).
 
 ```ts
+❌ BAD — marks seen before the durable write; a thrown enqueue loses the event forever
 if (await seen(event.webhookId)) return res.sendStatus(200);
 await markSeen(event.webhookId);
+await queue.add(event);            // if this throws, event is marked seen but never processed
+
+✅ GOOD — atomic claim, enqueue, then 2xx
+// insertIfAbsent = unique-key INSERT / Redis SETNX; returns false if the id already existed
+if (!(await insertIfAbsent(event.webhookId))) return res.sendStatus(200); // duplicate → ack
+await queue.add(event);            // durable enqueue AFTER the claim succeeds
+res.sendStatus(200);
 ```
 
 ### 5. The event `type` tells you what happened
@@ -72,7 +81,7 @@ Common types: `ContactCreate/Update/Delete/DndUpdate`, `InboundMessage`, `Outbou
 ## Level 2: GHL's Retry Model — The Trap (Intermediate)
 
 ### GHL currently retries ONLY on HTTP 429 from your endpoint
-Unlike Stripe, GHL does **not** retry on your 5xx or timeouts. If your handler throws a 500 or times out, **the event is lost forever.**
+Unlike Stripe, GHL does **not** retry on your 5xx or timeouts. If your handler throws a 500 or times out, **the event is lost forever.** (Source: GHL marketplace apps retry only on 429 — highlevel-api-docs issue #257, an open request to add Stripe-style backoff. Because it's not yet fixed and could change, do not architect *around* GHL's retry behavior — own reliability yourself.)
 
 | Your response | GHL behavior | Consequence |
 |---|---|---|
@@ -97,8 +106,8 @@ app.post("/webhooks/ghl", (req, res) => {
 });
 ```
 
-### If you're overwhelmed, return 429 on purpose
-Because 429 is the one retryable code, you can shed load safely: when your queue is saturated, respond 429 and GHL will redeliver.
+### Don't rely on GHL redelivery — own your reliability
+Do NOT design a system whose correctness depends on GHL resending events. The safe posture: verify → durably persist → 2xx, then process from your own store with your own retries + dead-letter queue. Returning 429 when saturated *may* trigger a redelivery today, but treat that as a bonus, not a buffer — if the 429-retry behavior changes or your endpoint gets rate-limited, events you shed are gone. Persist before you ack so shedding is never your only line of defense.
 
 ### Support both headers during the transition
 Until 1 July 2026, verify `x-ghl-signature` if present, else fall back to `x-wh-signature` (RSA-SHA256) so older subscriptions keep working.
@@ -169,7 +178,7 @@ Events can arrive out of order (e.g. `Update` before `Create` under retries). Re
 ### Rule 3: Don't rely on GHL to retry your failures
 **You will be tempted to:** assume "webhooks retry" like Stripe and let transient errors bubble as 500s.
 **Why that fails:** GHL currently retries only on 429; every 5xx is a dropped event with no second chance.
-**The right way:** return 429 to shed load (retryable), never 5xx for recoverable work; own reliability in your queue.
+**The right way:** persist the event durably and 2xx *before* any fallible work; own retries + a DLQ in your queue. A 429 when saturated may earn a redelivery, but never let shedding be your only safety net — the retry behavior is undocumented-stable and may change.
 
 ### Rule 4: Idempotent receivers, always
 **You will be tempted to:** process each delivery as unique.

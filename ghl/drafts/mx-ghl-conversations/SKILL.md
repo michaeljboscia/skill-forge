@@ -61,11 +61,18 @@ Sending on a channel with no active provider (SMS phone number, email domain, Wh
 The **Conversation Providers** marketplace module lets you back SMS/Email/Call with your own infrastructure. Your provider receives delivery requests from GHL and reports status back. That's an app-build task — pair this with `mx-ghl-marketplace`.
 
 ### Add an inbound message (log a message you received elsewhere)
+The endpoint *is* the direction — there is no `direction` field. Provide `conversationId` **or** `contactId`. A `conversationProviderId` is required when you're using an additional custom SMS provider (not needed when replacing the default email/SMS provider).
+
 ```ts
-// Record an inbound message so it appears in the GHL thread
+✅ GOOD
 await ghlFetch("/conversations/messages/inbound", {
   method: "POST",
-  body: JSON.stringify({ type: "SMS", contactId, message: "Customer reply text", direction: "inbound" }),
+  body: JSON.stringify({
+    type: "SMS",
+    contactId,                       // or conversationId
+    message: "Customer reply text",
+    conversationProviderId,          // required for custom SMS providers
+  }),
 });
 ```
 
@@ -83,15 +90,25 @@ If a contact is marked Do-Not-Disturb (globally or per channel), sends may be bl
 
 ## Level 3: Reliable Messaging Automation (Advanced)
 
-### De-duplicate outbound sends with your own key
-GHL has no built-in idempotency key for sends. A retried send after a timeout can double-text a customer. Guard with your own store.
+### De-duplicate outbound sends with your own key — claim BEFORE sending
+GHL has no built-in idempotency key for sends. The dangerous case is a **timeout where the send actually delivered**: if you only mark-seen on a clean 2xx, a timeout throws before marking, the retry re-sends, and the customer is texted twice — the exact case dedup exists for. Claim the key first, then reconcile.
 
 ```ts
-async function sendOnce(dedupeKey: string, payload: object) {
-  if (await seen(dedupeKey)) return;            // already sent
+❌ BAD — only marks seen on success; a timeout after delivery double-texts
+async function sendOnce(dedupeKey, payload) {
+  if (await seen(dedupeKey)) return;
   const res = await ghlFetch("/conversations/messages", { method: "POST", body: JSON.stringify(payload) });
-  if (res.ok) await markSeen(dedupeKey);
-  return res;
+  if (res.ok) await markSeen(dedupeKey);        // never runs on timeout → retry re-sends
+}
+
+✅ GOOD — atomically claim first; release ONLY on a definite non-delivery
+async function sendOnce(dedupeKey, payload) {
+  if (!(await claim(dedupeKey))) return;        // atomic SETNX; already claimed → stop
+  try {
+    const res = await ghlFetch("/conversations/messages", { method: "POST", body: JSON.stringify(payload) });
+    if (!res.ok && res.status < 500) await release(dedupeKey); // 4xx = definitely not sent → allow retry
+    return res;                                  // timeout/5xx: keep the claim (ambiguous → don't re-send)
+  } catch { /* network timeout: ambiguous — keep the claim, reconcile out-of-band */ }
 }
 ```
 
@@ -144,7 +161,7 @@ await Promise.all(list.map(c => limit(() => send(c))));
 ### Rule 4: Add your own send idempotency
 **You will be tempted to:** retry a failed/timed-out send by just calling the endpoint again.
 **Why that fails:** the first send may have succeeded; there's no server idempotency key, so the customer gets texted twice.
-**The right way:** guard sends with your own dedupe key and only retry when you know the first didn't land.
+**The right way:** atomically *claim* the dedupe key before sending; release it only on a definite 4xx non-delivery. On a timeout/5xx keep the claim (delivery is ambiguous) and reconcile out-of-band rather than blind-retrying.
 
 ### Rule 5: Honor DND
 **You will be tempted to:** treat a suppressed/DND send as a transient failure and retry.

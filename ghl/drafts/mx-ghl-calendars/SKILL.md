@@ -20,10 +20,16 @@ description: GoHighLevel / HighLevel API v2 calendars and appointments for AI ag
 Booking a taken slot conflicts. Read availability first, then book a slot you got back.
 
 ```ts
-const slots = await ghlFetch(
+const resp = await ghlFetch(
   `/calendars/${calendarId}/free-slots?startDate=${startMs}&endDate=${endMs}&timezone=${encodeURIComponent(tz)}`
 ).then(r => r.json());
-// slots is grouped by date; pick one, then book it
+// resp is a DATE-KEYED object, not a flat array:
+//   { "2026-07-23": { slots: ["2026-07-23T14:00:00-04:00", ...] }, "2026-07-24": {...}, traceId: "..." }
+const allSlots = Object.entries(resp)
+  .filter(([k, v]) => k !== "traceId" && v && Array.isArray(v.slots))
+  .flatMap(([, v]) => v.slots)
+  .sort();                       // ISO strings sort chronologically
+const next = allSlots[0];        // earliest offered slot
 ```
 
 ### 2. `startDate`/`endDate` for slots are epoch milliseconds
@@ -80,7 +86,10 @@ const calendarId = calendars.find(c => c.name === "Sales Demo").id;
 | Double-booked | booked without re-checking slots | fetch free-slots immediately before booking |
 
 ### Book the slot you were offered, not a computed one
-Don't compute the next slot yourself. Take an actual returned free slot's start/end so it matches the calendar's slot interval and buffers.
+Don't compute the next slot yourself. Take an actual returned free slot's start/end so it matches the calendar's slot interval and buffers. Derive `endTime` from the calendar's own `slotDuration`/`slotDurationUnit` rather than hardcoding 30 minutes.
+
+### Team / round-robin calendars need the assigned user
+On round-robin or multi-user calendars, a free slot belongs to a specific user. Pass `userId` when requesting free-slots (to scope availability) and set `assignedUserId` on the appointment to pin the resource that actually owned the slot — otherwise you can book a user who isn't free.
 
 ### Appointment status values
 `new`, `confirmed`, `cancelled`, `showed`, `noshow`, `invalid` (set what the flow needs). Cancelling is a status/update, not necessarily a delete.

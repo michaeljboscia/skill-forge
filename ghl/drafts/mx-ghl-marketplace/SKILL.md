@@ -57,16 +57,23 @@ Embedded custom pages get an *encrypted* user context. Decrypt it on your backen
 Custom Pages run inside the CRM iframe. Ask the parent for the session, then send the encrypted blob to your backend.
 
 ```ts
-// In the embedded page
+// In the embedded page — CHECK event.origin and clean up the listener
+const GHL_ORIGINS = ["https://app.gohighlevel.com", "https://app.leadconnectorhq.com"]; // allowlist
 const encrypted: string = await new Promise((resolve) => {
-  window.parent.postMessage({ message: "REQUEST_USER_DATA" }, "*");
-  window.addEventListener("message", ({ data }) => {
-    if (data?.message === "REQUEST_USER_DATA_RESPONSE") resolve(data.payload);
-  });
+  const onMsg = ({ origin, data }: MessageEvent) => {
+    if (!GHL_ORIGINS.includes(origin)) return;                 // ignore spoofed frames
+    if (data?.message === "REQUEST_USER_DATA_RESPONSE") {
+      window.removeEventListener("message", onMsg);            // don't leak the listener
+      resolve(data.payload);
+    }
+  };
+  window.addEventListener("message", onMsg);
+  window.parent.postMessage({ message: "REQUEST_USER_DATA" }, "*"); // parent origin varies; server-side decrypt is the real gate
 });
 // Some app types use window.exposeSessionDetails(APP_ID) instead.
 await fetch("/api/decrypt-sso", { method: "POST", body: JSON.stringify({ encrypted }) });
 ```
+Even with an origin check, the payload is still untrusted until your backend decrypts it with the SSO key — the origin check just stops obviously-hostile frames from feeding your decrypt path and prevents the listener leaking.
 
 ### Decrypt on the backend with the SSO key (AES-256-CBC, OpenSSL "Salted__" format)
 ```ts

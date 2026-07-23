@@ -139,10 +139,17 @@ Request a scope in the URL that the app didn't declare → error. Call an endpoi
 
 ## Level 3: Resilient Clients (Advanced)
 
-### One adapter, every call goes through it
-Centralize base URL, Version header, auth, retry, and rate-limit awareness. Never scatter raw `fetch` to GHL across the codebase.
+### One adapter, every call goes through it — with single-flight refresh
+Centralize base URL, Version header, auth, retry, and rate-limit awareness. Never scatter raw `fetch` to GHL across the codebase. **Critically: serialize token refresh through one in-flight promise.** Under concurrency (you *will* use `p-limit`/`Promise.all`), several requests 401 at once; if each refreshes independently, the first rotates the refresh token and the rest fail with a now-invalid one → lockout.
 
 ```ts
+let refreshInFlight: Promise<void> | null = null;
+function refreshOnce(): Promise<void> {
+  // single-flight: concurrent callers await the SAME refresh, never start a second
+  if (!refreshInFlight) refreshInFlight = refreshAndStore().finally(() => { refreshInFlight = null; });
+  return refreshInFlight;
+}
+
 async function ghlFetch(path: string, init: RequestInit = {}, tries = 0): Promise<Response> {
   const res = await fetch(`https://services.leadconnectorhq.com${path}`, {
     ...init,
@@ -154,15 +161,22 @@ async function ghlFetch(path: string, init: RequestInit = {}, tries = 0): Promis
     await new Promise(r => setTimeout(r, wait));
     return ghlFetch(path, init, tries + 1);
   }
-  if (res.status === 401 && tries === 0) { await refreshAndStore(); return ghlFetch(path, init, tries + 1); }
+  if (res.status === 401 && tries === 0) { await refreshOnce(); return ghlFetch(path, init, tries + 1); }
   return res;
 }
 ```
 
-### Cursor pagination — loop until short page
-List endpoints use `limit` (max 100) + `startAfter` (timestamp) + `startAfterId`. There is no reliable `page` or sort param.
+### Pagination is per-endpoint — do not assume one scheme
+GHL has no standardized pagination (there's an open request to fix this). Using the wrong scheme silently returns page 1 forever and under-reports.
+
+| Resource | Scheme |
+|---|---|
+| `/contacts/` | `limit` (max 100) + `startAfter` (timestamp) + `startAfterId` |
+| `/opportunities/search` | `page` + `limit` |
+| `/payments/transactions`, `/payments/orders` | `offset` + `limit` (with `altId`/`altType`, see `mx-ghl-payments`) |
 
 ```ts
+// Contacts — cursor loop, stop on short page
 let startAfter, startAfterId, all = [];
 do {
   const p = new URLSearchParams({ locationId, limit: "100" });
@@ -170,14 +184,14 @@ do {
   const { contacts, meta } = await ghlFetch(`/contacts/?${p}`).then(r => r.json());
   all.push(...contacts);
   ({ startAfter, startAfterId } = meta ?? {});
-} while (startAfter);   // stop when the page is short / meta empty
+} while (startAfter && contacts.length === 100);   // stop when the page is short / cursor empty
 ```
 
 ---
 
 ## Performance: Make It Fast
 
-- **Respect the burst budget: 100 requests / 10s per app per Location.** A tight `for` loop over 500 contacts will 429 by request 101. Batch, or throttle to ≤10 req/s with a concurrency limiter (e.g. `p-limit`).
+- **Respect the burst budget: 100 requests / 10s per app, per resource.** The resource is the **Location** for a location token and the **Company** for an agency token — an agency app's calls (and every `/oauth/locationToken` mint) draw on ONE shared company budget across all its locations, not a fresh 200k per location. A tight `for` loop over 500 contacts will 429 by request 101. Batch, or throttle to ≤10 req/s with a concurrency limiter (e.g. `p-limit`).
 - **Prefer webhooks over polling.** Subscribing to `ContactUpdate`/`OpportunityStatusUpdate` costs zero of your daily 200k budget vs. polling lists every minute.
 - **Cache stable lookups** (pipeline IDs, custom-field IDs, calendar IDs, location settings) for the process lifetime — they change rarely and cost a request each.
 
@@ -235,3 +249,8 @@ Log the rate-limit headers on every response and alarm before you hit zero:
 **You will be tempted to:** call `/contacts` with the Company (agency) token because it authenticated fine.
 **Why that fails:** most resources are Location-scoped; the agency token 401s or returns nothing.
 **The right way:** exchange via `/oauth/locationToken` (companyId + locationId) and use the location token for resource calls.
+
+### Rule 6: Refresh must be single-flight
+**You will be tempted to:** refresh the token inline on each 401, since "it works" in a single-threaded test.
+**Why that fails:** under concurrency (your own `p-limit`/`Promise.all`), many requests 401 at once and each starts its own refresh. Refresh tokens rotate and are single-use, so the first refresh invalidates the token every other in-flight refresh is using → a cascade of failures that persists a dead token and locks you out — the exact catastrophe Rule 4 warns about, reached through concurrency.
+**The right way:** funnel all refreshes through one in-flight promise (single-flight/mutex); concurrent callers await the same refresh. Persist the rotated refresh_token only from a successful response.

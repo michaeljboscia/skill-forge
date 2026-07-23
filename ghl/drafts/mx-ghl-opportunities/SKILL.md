@@ -16,8 +16,8 @@ description: GoHighLevel / HighLevel API v2 opportunities and pipelines for AI a
 
 ## Level 1: Patterns That Always Work (Beginner)
 
-### 1. Creating an opportunity needs four IDs plus a status
-Required: `locationId`, `pipelineId`, `pipelineStageId`, `name`, `status`. Almost always also `contactId`.
+### 1. Creating an opportunity needs the pipeline coordinates
+Required: `locationId`, `pipelineId`, `pipelineStageId`, `name`. `status` defaults to `open` if omitted, but set it explicitly. Provide `contactId` to link the deal to a contact (do this unless you have a specific reason not to). Confirm the exact required set against the current Create Opportunity schema before relying on a field being optional.
 
 ```ts
 ✅ GOOD
@@ -50,11 +50,12 @@ const stageId = pipeline.stages.find(s => s.name === "Proposal Sent").id;
 ### 4. `monetaryValue` is a plain number
 No currency symbol, no string. `4500`, not `"$4,500"`. The currency is the location's setting; the API stores a bare number.
 
-### 5. Move a stage with an update, don't recreate
+### 5. Move a stage with an update, don't recreate — send `pipelineId` too
+A stage id is only meaningful within its pipeline, so include `pipelineId` alongside `pipelineStageId` on the update. Stage-only updates commonly 422 or no-op.
 ```ts
 await ghlFetch(`/opportunities/${opportunityId}`, {
   method: "PUT",
-  body: JSON.stringify({ pipelineStageId: nextStageId }),
+  body: JSON.stringify({ pipelineId, pipelineStageId: nextStageId }),
 });
 ```
 
@@ -71,7 +72,7 @@ Marking `status: "won"` does **not** move the stage, and moving to a "Closed Won
 ```ts
 await ghlFetch(`/opportunities/${id}`, {
   method: "PUT",
-  body: JSON.stringify({ status: "won", pipelineStageId: closedWonStageId }),
+  body: JSON.stringify({ status: "won", pipelineId, pipelineStageId: closedWonStageId }),
 });
 ```
 
@@ -153,7 +154,7 @@ await Promise.all(deals.map(d => limit(() => create(d, resolve))));
 **Why that fails:** the field expects a number; a string 422s or stores garbage, breaking pipeline value reports.
 **The right way:** send `4500` as a number; format for display only in your own UI.
 
-### Rule 5: Stage must belong to the pipeline you named
-**You will be tempted to:** reuse a stage ID across pipelines because the names look similar.
-**Why that fails:** a stage from another pipeline mismatches `pipelineId` → 422 or a misfiled opportunity.
-**The right way:** always take `pipelineStageId` from the same pipeline object you took `pipelineId` from.
+### Rule 5: Stage must belong to the pipeline you named — and send both
+**You will be tempted to:** reuse a stage ID across pipelines because the names look similar, or send `pipelineStageId` alone on an update.
+**Why that fails:** a stage from another pipeline mismatches `pipelineId` → 422 or a misfiled opportunity; and a stage-only update commonly 422s or no-ops because a stage id is meaningless without its pipeline.
+**The right way:** always take `pipelineStageId` from the same pipeline object you took `pipelineId` from, and send **both** `pipelineId` and `pipelineStageId` on create AND update.

@@ -37,18 +37,25 @@ Creating orders/subscriptions via API is largely **not exposed**. Invoices have 
 | Transactions | `payments/transactions.readonly` |
 | Subscriptions | `payments/subscriptions.readonly` |
 
-### 3. Everything is location-scoped and paginated
-Pass `locationId` (or `altId`/`altType` where required) and paginate with `limit` + cursor (see `mx-ghl-core`). Don't fetch "all revenue" in one call.
+### 3. Payments endpoints use `altId` + `altType`, not `locationId`, and paginate by `offset`
+The payments/invoices surface does **not** take `locationId`. Scope with `altId` (the location id) + `altType=location`, and paginate with `offset` + `limit` (not the contacts-style `startAfter` cursor). Don't fetch "all revenue" in one call.
 
 ### 4. Filter transactions server-side
 ```ts
-const p = new URLSearchParams({
-  locationId, limit: "100",
-  startAt: "2026-07-01", endAt: "2026-07-31",
-  paymentMode: "live",              // live vs test
-  // status, contactId, subscriptionId, entityId also supported
-});
-const { data } = await ghlFetch(`/payments/transactions/?${p}`).then(r => r.json());
+const all = []; let offset = 0; const limit = 100;
+for (;;) {
+  const p = new URLSearchParams({
+    altId: locationId, altType: "location",
+    limit: String(limit), offset: String(offset),
+    startAt: "2026-07-01", endAt: "2026-07-31",
+    paymentMode: "live",              // live vs test
+    // status, contactId, subscriptionId, entityId also supported
+  });
+  const { data } = await ghlFetch(`/payments/transactions/?${p}`).then(r => r.json());
+  all.push(...(data ?? []));
+  if ((data?.length ?? 0) < limit) break;   // short page → done
+  offset += limit;
+}
 ```
 
 ### 5. Money is money — never do float math on amounts
@@ -72,7 +79,28 @@ Reconcile by linking transactions to their `orderId`/`subscriptionId`/`entityId`
 
 ---
 
-## Level 3: Custom Payment Provider (Advanced)
+## Level 3: Getting External Sales Into GHL & Custom Providers (Advanced)
+
+### Externally-originated sales → Invoices, not Orders
+There is no create-order API, but **invoices are writable**. To make a sale that happened in your own system appear in GHL: upsert the contact, create an invoice, then record payment on it. A paid invoice is the nearest first-class GHL object to an external order.
+```ts
+// 1) create the invoice (altId/altType, major-unit item amounts)
+const inv = await ghlFetch("/invoices/", { method: "POST", body: JSON.stringify({
+  altId: locationId, altType: "location",
+  name: `Order ${externalId}`, currency: "USD",
+  invoiceNumber: `EXT-${externalId}`,          // deterministic → idempotency anchor
+  contactDetails: { id: contactId },
+  items: [{ name: "Plan", currency: "USD", amount: 199.0, qty: 1 }],
+})}).then(r => r.json());
+
+// 2) record the payment so it reflects a completed sale
+await ghlFetch(`/invoices/${inv._id ?? inv.id}/record-payment`, { method: "POST", body: JSON.stringify({
+  altId: locationId, altType: "location", mode: "external", amount: 199.0, notes: `ext ${externalId}`,
+})});
+```
+Check whether an invoice with `EXT-${externalId}` already exists before creating, so re-runs don't double-post.
+
+### Custom Payment Provider (be the processor)
 
 ### The Payments marketplace module lets you be the processor
 Building a custom payment provider is an app-build task (pair with `mx-ghl-marketplace`): you register a provider, GHL sends you charge/verify requests, and you report status back. Handle:
@@ -93,7 +121,7 @@ Pull GHL transactions and your processor's ledger for the same window and diff. 
 
 ```ts
 ❌ BAD — poll every minute for new transactions
-setInterval(() => ghlFetch(`/payments/transactions/?locationId=${loc}`), 60_000);
+setInterval(() => ghlFetch(`/payments/transactions/?altId=${loc}&altType=location`), 60_000);
 
 ✅ GOOD — react to transaction/order webhooks; reconcile on a schedule
 ```

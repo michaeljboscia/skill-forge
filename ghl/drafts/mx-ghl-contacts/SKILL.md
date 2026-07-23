@@ -73,9 +73,15 @@ Upsert obeys the location's **Allow Duplicate Contact** setting and its match pr
 
 **Implication:** don't assume upsert merges A and B. It picks one. If you need true reconciliation, search first and decide explicitly.
 
-### Search before you assume
+### Search before you assume — use the purpose-built duplicate check
+For a straight "does this contact already exist?" check, GHL has a dedicated, cheaper endpoint built for exactly this:
 ```ts
-// Find by exact email/phone before creating, when you need control over the match
+const dup = await ghlFetch(
+  `/contacts/search/duplicate?locationId=${locationId}&email=${encodeURIComponent(email)}&phone=${encodeURIComponent(phone)}`
+).then(r => r.json());   // returns the matching contact if one exists
+```
+Use the richer `POST /contacts/search` (filters DSL) only when you need multi-field or non-equality matching:
+```ts
 const { contacts } = await ghlFetch("/contacts/search", {
   method: "POST",
   body: JSON.stringify({ locationId, filters: [{ field: "email", operator: "eq", value: email }] }),
@@ -95,6 +101,16 @@ customFields: [
 ]
 ```
 A scalar into a multi-select field (or a bad date format) → **422 Unprocessable Entity**.
+
+### Reads return `value`; writes expect `field_value` — never echo GET back into a POST
+The response asymmetry is a silent-failure trap. `GET /contacts/{id}` returns custom fields as `{ id, value }`; create/update/upsert expect `{ id, field_value }` (or `{ key, field_value }`). A naive read-modify-write reuses `value`, which the write side ignores — the field silently never updates.
+```ts
+// map GET shape → write shape on any read-modify-write
+const writeFields = (contact.customFields ?? []).map(f => ({ id: f.id, field_value: f.value }));
+```
+
+### Do-Not-Disturb travels on the contact
+DND is a contact property, not a per-send flag. Set it on create/update via `dnd: true` (and channel-level `dndSettings` for granular control), and read it back from the contact before messaging (see `mx-ghl-conversations` Rule 5).
 
 ---
 
@@ -158,7 +174,7 @@ await Promise.all(records.map(r => limit(() => upsert(r, byKey))));
 ### Rule 2: Custom fields go in the customFields array by ID
 **You will be tempted to:** set a custom field as a top-level property using its display name.
 **Why that fails:** GHL ignores unknown top-level keys or 422s; the field silently never updates.
-**The right way:** `customFields: [{ id, field_value }]` with the field's per-location ID.
+**The right way:** `customFields: [{ id, field_value }]` with the field's per-location ID. And remember the read/write asymmetry — GET returns `{ id, value }`, so map `value` → `field_value` on any read-modify-write instead of echoing the GET shape back.
 
 ### Rule 3: Never hardcode custom-field IDs
 **You will be tempted to:** paste the field ID from one sub-account into config and reuse it everywhere.
